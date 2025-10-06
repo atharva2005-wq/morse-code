@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Morse Code ASK Simulator</title>
+  <style>
+    body {
+      background: linear-gradient(135deg, #341e3b, #290f2a);
+      color: white;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      text-align: center;
+      padding: 40px;
+      min-height: 100vh;
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      margin-bottom: 25px;
+      color: #60a5fa;
+      text-shadow: 0 0 10px rgba(96,165,250,0.6);
+    }
+
+    .container {
+      max-width: 800px;
+      margin: auto;
+      background: rgba(30, 41, 59, 0.9);
+      padding: 30px;
+      border-radius: 20px;
+      box-shadow: 0 0 20px rgba(0,0,0,0.5);
+    }
+
+    input {
+      padding: 10px;
+      border-radius: 8px;
+      border: none;
+      margin-right: 10px;
+      width: 250px;
+      font-size: 1rem;
+    }
+
+    button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      background: linear-gradient(90deg, #3b82f6, #2563eb);
+      color: white;
+      cursor: pointer;
+      font-weight: bold;
+      margin: 5px;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 15px rgba(59,130,246,0.6);
+    }
+
+    .morse {
+      margin: 20px 0;
+      font-size: 1.3rem;
+      color: #a5b4fc;
+    }
+
+    .light {
+      width: 140px;
+      height: 140px;
+      margin: 30px auto;
+      border-radius: 50%;
+      border: 6px solid #475569;
+      background: #1e293b;
+      box-shadow: 0 0 25px rgba(0, 0, 0, 0.6);
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+
+    .light.on {
+      background: #f87171;
+      box-shadow: 0 0 50px #f87171, 0 0 80px #f87171;
+    }
+
+    canvas {
+      background: #0f172a;
+      border-radius: 10px;
+      margin-top: 20px;
+      width: 100%;
+      height: 200px;
+    }
+
+    .status {
+      margin-top: 20px;
+      font-size: 1.1rem;
+      color: #fcd34d;
+      font-weight: bold;
+    }
+
+    footer {
+      margin-top: 40px;
+      font-size: 0.9rem;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔦 Morse Code ASK Simulator</h1>
+
+    <div>
+      <input type="text" id="textInput" placeholder="Enter text to transmit" />
+      <button onclick="startTransmission()">Start</button>
+      <button onclick="stopTransmission()">Stop</button>
+    </div>
+
+    <p id="morseOutput" class="morse"></p>
+
+    <div id="light" class="light"></div>
+
+    <canvas id="askCanvas" width="700" height="200"></canvas>
+
+    <p id="status" class="status">Idle</p>
+  </div>
+
+  <footer>&copy; Digital Communication Micro Project 2025</footer>
+
+  <script>
+    const MORSE_CODE = {
+      A: ".-", B: "-...", C: "-.-.", D: "-..", E: ".",
+      F: "..-.", G: "--.", H: "....", I: "..", J: ".---",
+      K: "-.-", L: ".-..", M: "--", N: "-.", O: "---",
+      P: ".--.", Q: "--.-", R: ".-.", S: "...", T: "-",
+      U: "..-", V: "...-", W: ".--", X: "-..-", Y: "-.--", Z: "--..",
+      1: ".----", 2: "..---", 3: "...--", 4: "....-", 5: ".....",
+      6: "-....", 7: "--...", 8: "---..", 9: "----.", 0: "-----",
+    };
+
+    let signal = [];
+    let currentIndex = 0;
+    let intervalId = null;
+    let audioCtx = null;
+    let oscillator = null;
+    let isTransmitting = false;
+    let transmissionFinished = false;
+    const canvas = document.getElementById("askCanvas");
+    const ctx = canvas.getContext("2d");
+    let waveformData = [];
+
+    function textToMorse(text) {
+      return text.toUpperCase()
+        .split("")
+        .map(ch => MORSE_CODE[ch] || "")
+        .join(" ");
+    }
+
+    function morseToSignal(morse) {
+      let sequence = [];
+      for (let char of morse) {
+        if (char === ".") {
+          sequence.push(1);
+          sequence.push(0);
+        } else if (char === "-") {
+          sequence.push(1, 1, 1);
+          sequence.push(0);
+        } else if (char === " ") {
+          sequence.push(0, 0, 0);
+        }
+      }
+      return sequence;
+    }
+
+    function playBeep(on) {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (on && !transmissionFinished) {
+        if (!oscillator) {
+          oscillator = audioCtx.createOscillator();
+          oscillator.type = "sine";
+          oscillator.frequency.setValueAtTime(600, audioCtx.currentTime);
+          oscillator.connect(audioCtx.destination);
+          oscillator.start();
+        }
+      } else {
+        if (oscillator) {
+          oscillator.stop();
+          oscillator.disconnect();
+          oscillator = null;
+        }
+      }
+    }
+
+    function drawASK(on) {
+      const amplitude = on ? 60 : 5;
+      waveformData.push(amplitude);
+      if (waveformData.length > canvas.width) waveformData.shift();
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.beginPath();
+      ctx.moveTo(0, canvas.height / 2);
+
+      for (let i = 0; i < waveformData.length; i++) {
+        const y = canvas.height / 2 - waveformData[i] * Math.sin(i * 0.2);
+        ctx.lineTo(i, y);
+      }
+
+      ctx.strokeStyle = on ? "#f87171" : "#60a5fa";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    function startTransmission() {
+      if (isTransmitting || transmissionFinished) return;
+
+      const text = document.getElementById("textInput").value.trim();
+      if (!text) return;
+
+      const morse = textToMorse(text);
+      signal = morseToSignal(morse);
+      currentIndex = 0;
+      isTransmitting = true;
+      transmissionFinished = false;
+      waveformData = [];
+
+      document.getElementById("morseOutput").innerText = "Morse: " + morse;
+      document.getElementById("status").innerText = "🔴 Transmitting...";
+
+      intervalId = setInterval(transmitStep, 400);
+    }
+
+    function transmitStep() {
+      const light = document.getElementById("light");
+
+      if (currentIndex < signal.length) {
+        if (signal[currentIndex] === 1) {
+          light.classList.add("on");
+          playBeep(true);
+          drawASK(true);
+        } else {
+          light.classList.remove("on");
+          playBeep(false);
+          drawASK(false);
+        }
+        currentIndex++;
+      } else {
+        endTransmission();
+      }
+    }
+
+    function endTransmission() {
+      clearInterval(intervalId);
+      playBeep(false);
+      document.getElementById("light").classList.remove("on");
+      document.getElementById("status").innerText = "✅ Transmission Complete";
+      isTransmitting = false;
+      transmissionFinished = true;
+    }
+
+    function stopTransmission() {
+      clearInterval(intervalId);
+      playBeep(false);
+      document.getElementById("light").classList.remove("on");
+      document.getElementById("status").innerText = "⏹️ Stopped";
+      isTransmitting = false;
+      transmissionFinished = true;
+    }
+  </script>
+</body>
+</html>
